@@ -4,82 +4,119 @@
     <meta charset="UTF-8">
     <title>Aegis-BPF Control Plane</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        body { background-color: #0f172a; color: #f8fafc; font-family: 'Inter', sans-serif; }
-        .log-container { height: calc(100vh - 200px); overflow-y: auto; }
-        .log-entry { font-family: 'Fira Code', monospace; font-size: 0.875rem; border-bottom: 1px solid #1e293b; }
+        body { background-color: #0b1120; color: #f8fafc; font-family: 'Inter', sans-serif; transition: background-color 0.3s; }
+        .log-container { height: calc(100vh - 350px); overflow-y: auto; }
+        .log-entry { font-family: 'Fira Code', monospace; font-size: 0.875rem; border-bottom: 1px solid #1e293b; animation: slideIn 0.3s ease-out; }
+        @keyframes slideIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
         ::-webkit-scrollbar { width: 8px; }
         ::-webkit-scrollbar-track { background: #0f172a; }
         ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+        .threat-flash { animation: redFlash 0.8s ease-out; }
+        @keyframes redFlash { 0% { background-color: #7f1d1d; } 100% { background-color: #0b1120; } }
+        .radar-blip { animation: ping 2s cubic-bezier(0, 0, 0.2, 1) infinite; }
     </style>
 </head>
-<body class="flex h-screen overflow-hidden">
+<body class="flex h-screen overflow-hidden" id="main-body">
     <!-- Sidebar -->
-    <aside class="w-64 bg-slate-900 border-r border-slate-800 flex flex-col">
-        <div class="p-6 border-b border-slate-800">
-            <h1 class="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-emerald-400">Aegis-BPF</h1>
-            <p class="text-xs text-slate-400 mt-1">Kernel-Level Enforcement</p>
-            <p class="text-[10px] text-blue-400 font-mono mt-2 px-2 py-1 bg-blue-900/30 rounded border border-blue-800/50">CO-RE Production Node</p>
+    <aside class="w-64 bg-slate-900 border-r border-slate-800 flex flex-col relative overflow-hidden">
+        <div class="absolute inset-0 bg-gradient-to-b from-blue-900/20 to-transparent pointer-events-none"></div>
+        <div class="p-6 border-b border-slate-800 z-10">
+            <h1 class="text-3xl font-black tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-blue-400 via-indigo-400 to-emerald-400">AEGIS<span class="text-slate-500 font-light">BPF</span></h1>
+            <p class="text-[10px] uppercase tracking-widest text-emerald-400 mt-2 font-bold flex items-center">
+                <span class="w-2 h-2 rounded-full bg-emerald-500 mr-2 radar-blip"></span> LIVE KERNEL LINK
+            </p>
         </div>
-        <nav class="flex-1 p-4 space-y-2">
-            <a href="#" class="block px-4 py-2 rounded bg-slate-800 text-blue-400 font-medium">Live Monitor</a>
-        </nav>
-        <div class="p-4 border-t border-slate-800">
-            <div class="flex items-center space-x-2">
-                <div class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
-                <span class="text-sm text-slate-300">Agent Sandbox: SECURE</span>
+        <div class="p-6 flex-1 z-10">
+            <div class="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50 shadow-inner">
+                <h3 class="text-xs text-slate-400 uppercase tracking-wider mb-2">Threat Prevention</h3>
+                <div class="text-4xl font-light text-red-400" id="blocked-huge">0</div>
+                <div class="text-xs text-slate-500 mt-1">Total Malicious Actions Stopped</div>
+            </div>
+            
+            <div class="mt-6">
+                <h3 class="text-xs text-slate-400 uppercase tracking-wider mb-2">Live Telemetry</h3>
+                <canvas id="sysChart" height="200"></canvas>
             </div>
         </div>
     </aside>
 
     <!-- Main Content -->
     <main class="flex-1 flex flex-col bg-slate-950">
-        <header class="h-16 border-b border-slate-800 flex items-center justify-between px-8 bg-slate-900/50">
-            <h2 class="text-lg font-semibold">Live Threat Monitor (Golang Node)</h2>
-            <div class="flex space-x-4 text-sm">
-                <div class="bg-slate-800 px-3 py-1 rounded border border-slate-700">Events: <span id="event-count" class="font-mono text-blue-400">0</span></div>
-                <div class="bg-slate-800 px-3 py-1 rounded border border-red-900/50">Blocked: <span id="blocked-count" class="font-mono text-red-400">0</span></div>
+        <header class="h-20 border-b border-slate-800 flex items-center justify-between px-8 bg-slate-900/80 backdrop-blur-md z-20 shadow-md">
+            <div class="flex items-center space-x-4">
+                <h2 class="text-xl font-semibold tracking-tight text-slate-200">Enforcement Dashboard</h2>
+                <span class="px-3 py-1 bg-blue-900/30 text-blue-400 text-xs font-mono rounded border border-blue-800/50">CO-RE Go Node</span>
+            </div>
+            <div class="flex space-x-6 text-sm font-mono">
+                <div class="flex flex-col items-end"><span class="text-slate-500 text-xs">Total Syscalls</span><span id="event-count" class="text-blue-400 text-lg">0</span></div>
+                <div class="flex flex-col items-end"><span class="text-slate-500 text-xs">Threats Blocked</span><span id="blocked-count" class="text-red-400 text-lg font-bold">0</span></div>
             </div>
         </header>
 
-        <div class="flex-1 p-6">
-            <div class="bg-slate-900 rounded-lg border border-slate-800 h-full flex flex-col shadow-xl">
-                <div class="px-4 py-3 border-b border-slate-800 bg-slate-800/50 flex text-xs font-semibold text-slate-400 uppercase tracking-wider">
-                    <div class="w-24">Status</div>
+        <div class="flex-1 p-8">
+            <div class="bg-slate-900/80 backdrop-blur-sm rounded-xl border border-slate-700/50 h-full flex flex-col shadow-2xl overflow-hidden">
+                <div class="px-6 py-4 border-b border-slate-800 bg-slate-800/80 flex text-xs font-bold text-slate-400 uppercase tracking-wider">
+                    <div class="w-32">Verdict</div>
                     <div class="w-24">PID</div>
                     <div class="w-32">Process</div>
                     <div class="w-32">Syscall</div>
-                    <div class="flex-1">Target / Details</div>
+                    <div class="flex-1">Execution Target</div>
                 </div>
-                <div id="logs" class="log-container p-2"></div>
+                <div id="logs" class="log-container p-2 flex flex-col-reverse"></div>
             </div>
         </div>
     </main>
 
     <script>
         const logs = document.getElementById('logs');
+        const body = document.getElementById('main-body');
         let count = 0, blockedCount = 0;
-        const source = new EventSource('/stream');
         
+        const ctx = document.getElementById('sysChart').getContext('2d');
+        const chart = new Chart(ctx, {
+            type: 'line',
+            data: { labels: ['','','','','',''], datasets: [{ label: 'Events/sec', data: [0,0,0,0,0,0], borderColor: '#3b82f6', tension: 0.4, borderWidth: 2, pointRadius: 0 }] },
+            options: { responsive: true, plugins: { legend: { display: false } }, scales: { x: { display: false }, y: { display: false, min: 0 } } }
+        });
+
+        setInterval(() => {
+            chart.data.datasets[0].data.shift();
+            chart.data.datasets[0].data.push(Math.random() * 2); 
+            chart.update();
+        }, 1000);
+
+        const source = new EventSource('/stream');
         source.onmessage = function(e) {
             const data = JSON.parse(e.data);
             count++;
             document.getElementById('event-count').textContent = count;
             
+            let currentData = chart.data.datasets[0].data;
+            currentData[currentData.length - 1] += 5;
+            chart.update();
+
             const isBlocked = data.blocked === 1;
             if (isBlocked) {
                 blockedCount++;
                 document.getElementById('blocked-count').textContent = blockedCount;
+                document.getElementById('blocked-huge').textContent = blockedCount;
+                
+                body.classList.remove('threat-flash');
+                void body.offsetWidth; 
+                body.classList.add('threat-flash');
             }
 
-            const status = isBlocked ? '<span class="text-red-400 font-bold">[BLOCKED]</span>' : '<span class="text-emerald-400">[ALLOWED]</span>';
-            const details = isBlocked ? '<span class="text-red-300">' + data.target + '</span> <span class="text-slate-500">— Terminated by Go Control Plane</span>' : '<span class="text-slate-300">' + data.target + '</span>';
+            const status = isBlocked ? '<span class="px-2 py-1 bg-red-900/50 text-red-400 rounded text-xs font-bold ring-1 ring-red-500/50">BLOCKED</span>' : '<span class="px-2 py-1 bg-emerald-900/30 text-emerald-400 rounded text-xs font-bold ring-1 ring-emerald-500/30">ALLOWED</span>';
+            const details = isBlocked ? '<span class="text-red-300">' + data.target + '</span> <span class="text-slate-500 font-sans text-xs ml-2 uppercase tracking-wide bg-slate-800 px-2 py-0.5 rounded border border-slate-700">SIGKILL Sent</span>' : '<span class="text-slate-300">' + data.target + '</span>';
             
             const entry = document.createElement('div');
-            entry.className = 'log-entry flex items-center px-2 py-2 ' + (isBlocked ? 'bg-red-950/20 border-red-900/30' : 'border-slate-800/50');
-            entry.innerHTML = '<div class="w-24">' + status + '</div><div class="w-24 text-slate-400">' + data.pid + '</div><div class="w-32 text-blue-300">' + data.comm + '</div><div class="w-32 text-purple-400">' + data.syscall + '</div><div class="flex-1 truncate">' + details + '</div>';
-            logs.appendChild(entry);
-            logs.scrollTop = logs.scrollHeight;
+            entry.className = 'log-entry flex items-center px-4 py-3 ' + (isBlocked ? 'bg-red-950/20 border-red-900/30' : 'border-slate-800/30');
+            entry.innerHTML = '<div class="w-32">' + status + '</div><div class="w-24 text-slate-500">' + data.pid + '</div><div class="w-32 text-blue-300 font-semibold">' + data.comm + '</div><div class="w-32 text-purple-400">' + data.syscall + '</div><div class="flex-1 truncate">' + details + '</div>';
+            
+            logs.prepend(entry);
+            if(logs.children.length > 50) logs.removeChild(logs.lastChild);
         };
     </script>
 </body>

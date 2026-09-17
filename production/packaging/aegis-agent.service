@@ -1,0 +1,13 @@
+[Unit]
+Description=Aegis-BPF Enforcement Agent
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/aegis-agent
+Restart=on-failure
+# We need CAP_BPF, CAP_SYS_ADMIN, etc.
+AmbientCapabilities=CAP_BPF CAP_SYS_ADMIN CAP_PERFMON
+
+[Install]
+WantedBy=multi-user.target

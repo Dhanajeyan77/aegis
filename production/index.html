@@ -39,6 +39,12 @@
                 <h3 class="text-xs text-slate-400 uppercase tracking-wider mb-2">Live Telemetry</h3>
                 <canvas id="sysChart" height="200"></canvas>
             </div>
+            
+            <div class="mt-8 border-t border-slate-700/50 pt-4">
+                <h3 class="text-xs text-slate-400 uppercase tracking-wider mb-2">Dynamic Policy Map</h3>
+                <input id="policyPath" type="text" placeholder="e.g. /usr/bin/curl" class="w-full bg-slate-950 text-slate-200 text-xs px-3 py-2 rounded border border-slate-700 outline-none focus:border-blue-500 mb-2">
+                <button onclick="blockPath()" class="w-full bg-red-500/20 text-red-400 border border-red-500/50 px-3 py-1.5 text-xs rounded font-bold hover:bg-red-500/40 transition">INSERT KERNEL BLOCK</button>
+            </div>
         </div>
     </aside>
 
@@ -64,12 +70,24 @@
                     <div class="w-32">Syscall</div>
                     <div class="flex-1">Execution Target</div>
                 </div>
-                <div id="logs" class="log-container p-2 flex flex-col-reverse"></div>
+                <div id="logs" class="log-container p-2"></div>
             </div>
         </div>
     </main>
 
     <script>
+        function blockPath() {
+            const p = document.getElementById("policyPath").value;
+            if(!p) return;
+            fetch("/api/policy", { method: "POST", body: JSON.stringify({path: p, action: "block"}) })
+            .then(r=>r.json()).then(d => {
+                document.getElementById("policyPath").value="";
+                const btn = document.querySelector('button');
+                btn.textContent = "INJECTED!";
+                setTimeout(()=>btn.textContent = "INSERT KERNEL BLOCK", 2000);
+            });
+        }
+
         const logs = document.getElementById('logs');
         const body = document.getElementById('main-body');
         let count = 0, blockedCount = 0;

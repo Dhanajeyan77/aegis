@@ -10,11 +10,13 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"strings"
 	_ "embed"
 
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/cilium/ebpf/rlimit"
+	"github.com/cilium/ebpf"
 )
 
 //go:embed index.html
@@ -35,8 +37,16 @@ type UIEvent struct {
 	Blocked int    `json:"blocked"`
 }
 
+type PolicyRequest struct {
+	Path   string `json:"path"`
+	Action string `json:"action"` // "block" or "allow"
+}
+
 var eventChan = make(chan UIEvent, 100)
 var clients = make(map[chan UIEvent]bool)
+
+// Global reference to the dynamic map
+var blocklistMap *ebpf.Map
 
 func handler(w http.ResponseWriter, r *http.Request) {
 	w.Write(indexHTML)
@@ -64,17 +74,49 @@ func sseHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func apiPolicyHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req PolicyRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Prepare key (256 byte array)
+	var key [256]byte
+	copy(key[:], req.Path)
+
+	var value uint32 = 0
+	if req.Action == "block" {
+		value = 1
+	}
+
+	if err := blocklistMap.Put(key, value); err != nil {
+		http.Error(w, "Failed to update kernel map", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprintf(w, "{\"status\": \"success\", \"message\": \"Kernel policy updated for %s\"}", req.Path)
+}
+
 func main() {
 	if err := rlimit.RemoveMemlock(); err != nil {
 		log.Fatalf("Failed to remove memlock: %v", err)
 	}
-	log.Println("Aegis-BPF Go Node Engine (CO-RE) initializing...")
+	log.Println("Aegis-BPF Dynamic Node Engine initializing...")
 
 	var objs bpfObjects
 	if err := loadBpfObjects(&objs, nil); err != nil {
 		log.Fatalf("Failed to load eBPF objects: %v", err)
 	}
 	defer objs.Close()
+	
+	blocklistMap = objs.Blocklist
 
 	tp, err := link.Tracepoint("syscalls", "sys_enter_execve", objs.TracepointSyscallsSysEnterExecve, nil)
 	if err != nil {
@@ -92,6 +134,7 @@ func main() {
 	go func() {
 		http.HandleFunc("/", handler)
 		http.HandleFunc("/stream", sseHandler)
+		http.HandleFunc("/api/policy", apiPolicyHandler) // NEW DYNAMIC API
 		log.Println("Web Dashboard running natively on http://0.0.0.0:8080")
 		if err := http.ListenAndServe(":8080", nil); err != nil {
 			log.Fatal(err)
@@ -117,6 +160,10 @@ func main() {
 			if err := binary.Read(bytes.NewBuffer(record.RawSample), binary.LittleEndian, &bpfEvent); err == nil {
 				comm := string(bytes.TrimRight(bpfEvent.Comm[:], "\x00"))
 				target := string(bytes.TrimRight(bpfEvent.Target[:], "\x00"))
+
+				if strings.Contains(comm, "snapd") || strings.Contains(comm, "systemd") || strings.Contains(comm, "cron") || strings.Contains(comm, "dbus") || strings.Contains(comm, "apparmor") {
+					continue
+				}
 
 				uiEvent := UIEvent{
 					PID:     bpfEvent.PID,

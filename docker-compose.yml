@@ -1,0 +1,7 @@
+version: '3.8'
+services:
+  rogue-ai:
+    build: ./docker
+    container_name: aegis-docker-sandbox
+    stdin_open: true
+    tty: true
